@@ -73,14 +73,32 @@ TOOL_PRESETS = {
     'all':     TOOLS,
 }
 
-BLOCKED = ('/System', '/private/var/db', '/dev', '/Library/Keychains')
+BLOCKED = ('/System', '/private/var/db', '/dev', '/Library/Keychains',
+           '/etc', '/usr', '/bin', '/sbin', '/var', '/opt')
+
+# ★ 白名单：默认只能读项目目录。要访问别的目录，必须显式 --allow-dir 授权。
+#   背景：模型会改写路径（防泄漏训练的副作用），光靠黑名单挡不住——
+#   它可能被"引导"到 ~/Documents、~/Desktop 等任意目录去列文件。
+ALLOW_ROOTS = [os.path.expanduser('~/LycheeAI')]
+
+
+def in_scope(p):
+    p = os.path.realpath(os.path.expanduser(p))
+    return any(p == r or p.startswith(r + os.sep) for r in ALLOW_ROOTS)
+
+
+def scope_hint():
+    return '、'.join(r.replace(os.path.expanduser('~'), '~') for r in ALLOW_ROOTS)
 
 
 def _safe_path(p):
     p = os.path.expanduser(str(p).strip())
     if not os.path.isabs(p):
         p = os.path.abspath(p)
-    if any(p.startswith(b) for b in BLOCKED):
+    p = os.path.realpath(p)
+    if any(p == b or p.startswith(b + os.sep) for b in BLOCKED):
+        return None
+    if not in_scope(p):
         return None
     return p
 
@@ -88,7 +106,7 @@ def _safe_path(p):
 def tool_list_files(path):
     p = _safe_path(path)
     if not p:
-        return "错误：不允许访问这个路径"
+        return f"错误：路径不在允许范围（当前仅 {scope_hint()}）"
     if not os.path.isdir(p):
         return f"错误：{path} 不是目录或不存在"
     try:
@@ -110,7 +128,9 @@ def tool_list_files(path):
 
 def tool_search_files(query, path):
     p = _safe_path(path)
-    if not p or not os.path.isdir(p):
+    if not p:
+        return f"错误：路径不在允许范围（当前仅 {scope_hint()}）"
+    if not os.path.isdir(p):
         return f"错误：{path} 不是有效目录"
     q = str(query).lower()
     hits = []
@@ -143,7 +163,9 @@ _ALLOWED.update({'abs': abs, 'round': round, 'min': min, 'max': max, 'sum': sum}
 def tool_count_files(pattern, path):
     """★ 专治「让模型自己从列表里数」——它数不准会编数字"""
     p = _safe_path(path)
-    if not p or not os.path.isdir(p):
+    if not p:
+        return f"错误：路径不在允许范围（当前仅 {scope_hint()}）"
+    if not os.path.isdir(p):
         return f"错误：{path} 不是有效目录"
     pat = str(pattern).strip().lower()
     n, total = 0, 0
@@ -221,7 +243,7 @@ def retry_with_user_path(name, args, result, user_text):
         return result, False, args
     cands = re.findall(r'/(?:Users|home|var|opt|tmp|etc)[\w./\-]*', user_text)
     for c in sorted(set(cands), key=len, reverse=True):
-        if os.path.isdir(c):
+        if os.path.isdir(c) and in_scope(c):
             new_args = {**args, pk[0]: c}
             try:
                 return REGISTRY[name](**new_args), True, new_args
@@ -353,7 +375,16 @@ def main():
                     help=f'单轮最大输出 token（默认 {MAX_NEW}）')
     ap.add_argument('--toolset', choices=list(TOOL_PRESETS), default='files',
                     help='工具集：files(默认) / minimal / all')
+    ap.add_argument('--allow-dir', action='append', default=[], metavar='DIR',
+                    help='额外授权一个目录给工具读取（可多次）。默认只开放 ~/LycheeAI')
     args = ap.parse_args()
+
+    for d in args.allow_dir:
+        root = os.path.realpath(os.path.expanduser(d))
+        if not os.path.isdir(root):
+            print(f'  ⚠ 忽略不存在的目录：{d}')
+        elif root not in ALLOW_ROOTS:
+            ALLOW_ROOTS.append(root)
 
     tok, model = load()
     show_think = not args.no_think
@@ -382,8 +413,9 @@ def main():
             turn(model, tok, messages, current_tools(), show_think, max_new)
         return
 
-    print(f'\n输出上限 {max_new} token｜工具集 {ts_label()}。'
-          f'命令：:think  :tools  :clear  :quit')
+    print(f'\n输出上限 {max_new} token｜工具集 {ts_label()}｜'
+          f'文件访问范围 {scope_hint()}')
+    print('命令：:think  :tools  :clear  :quit')
     messages = []
     while True:
         try:
