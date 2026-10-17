@@ -44,16 +44,27 @@ if platform == 'hf':
         sys.exit(1)
 
 else:
+    # ★ ModelScope 的本地 cookie 有 30 天过期设定，过期后新版 SDK 会直接判定「未登录」
+    #   （报 10030000001 user not logged in），但**服务端会话往往仍然有效**。
+    #   解决：从 cookies 里读出 m_session_id，显式传给 API，绕过客户端的过期检查。
+    import pickle
     from modelscope.hub.api import HubApi
+
+    _jar = pickle.load(open(os.path.expanduser('~/.modelscope/credentials/cookies'), 'rb'))
+    TOK = next(c.value for c in _jar if c.name == 'm_session_id')
+    print(f'  使用本地会话 token: {TOK[:12]}…', flush=True)
+
     api = HubApi()
     try:
-        api.create_model(model_id=f'{OWNER}/{REPO}')
+        api.create_model(model_id=f'{OWNER}/{REPO}', token=TOK)
         print('MS 仓库已创建', flush=True)
     except Exception as e:
-        print(f'  create: {type(e).__name__}: {str(e)[:120]}（已存在则正常）', flush=True)
+        print(f'  create: {type(e).__name__}: {str(e)[:110]}（已存在则正常）', flush=True)
+
     for attempt in range(1, 4):
         try:
-            api.upload_folder(repo_id=f'{OWNER}/{REPO}', folder_path=SRC, repo_type='model')
+            api.upload_folder(repo_id=f'{OWNER}/{REPO}', folder_path=SRC,
+                              repo_type='model', token=TOK)
             print(f'MS 上传完成，用时 {time.time()-t0:.0f}s', flush=True)
             break
         except Exception as e:
