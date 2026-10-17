@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.DS_Store
+rune1_eval_result.json
