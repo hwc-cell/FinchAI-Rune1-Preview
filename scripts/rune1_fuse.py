@@ -24,9 +24,21 @@ for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy',
     os.environ.pop(k, None)
 os.environ['HF_HUB_OFFLINE'] = '1'
 
-MDL = '/Users/hwc/LycheeAI/MiniCPM-V-4.7-1B'
-ADAPTER = '/Users/hwc/LycheeAI/adapters-finchai-rune1'
-OUT = '/Users/hwc/LycheeAI/FinchAI-Rune1-Preview-f16'
+MDL = '/Users/hwc/LycheeAI/FinchAI-Rune1-Preview-f16'
+ADAPTER = '/Users/hwc/LycheeAI/adapters-finchai-rune1-v7'
+OUT = '/Users/hwc/LycheeAI/FinchAI-Rune1-Preview-v7-f16'
+
+import argparse
+ap = argparse.ArgumentParser()
+ap.add_argument('--base', default=MDL)
+ap.add_argument('--adapter', default=ADAPTER)
+ap.add_argument('--out', default=OUT)
+args = ap.parse_args()
+MDL, ADAPTER, OUT = args.base, args.adapter, args.out
+
+# ★ 保护：已发布的产物目录绝不能覆盖（FinchAI-Rune1-Preview-f16 已经上线三站）
+if os.path.isdir(OUT) and glob.glob(OUT + '/*'):
+    raise SystemExit(f'拒绝覆盖已有产物：{OUT}（先换个 --out）')
 
 import torch
 from transformers import AutoProcessor, AutoModelForImageTextToText

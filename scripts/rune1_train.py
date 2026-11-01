@@ -51,9 +51,19 @@ ap.add_argument('--epochs', type=float, default=DEFAULT_EPOCHS)
 ap.add_argument('--accum', type=int, default=8)
 ap.add_argument('--lr', type=float, default=1e-4)
 ap.add_argument('--cap', type=float, default=MEM_CAP)
+ap.add_argument('--base', default=MDL,
+                help='底座目录。原 base 已清理时可指向融合产物（FinchAI-Rune1-Preview-f16），'
+                     '等价于「在已微调模型上继续微调」——旧 adapter 已烧进权重，不会叠加冲突')
 ap.add_argument('--resume', action='store_true',
                 help='从 OUT 里已有的 adapter + train_state.json 续训')
+ap.add_argument('--out', default=OUT, help='adapter 输出目录（别指向旧版本，会覆盖）')
+ap.add_argument('--no-shuffle', action='store_true',
+                help='按数据文件的课程顺序训练。生成器已做轮转排序（稀缺子类型前置），'
+                     '不加这个参数就会被 shuffle 打乱，0.32 epoch 下可能一条都见不到')
 args = ap.parse_args()
+MDL = args.base
+OUT = args.out
+STATE = os.path.join(OUT, 'train_state.json')
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -215,7 +225,8 @@ run_loss, t_start = 0.0, time.time()
 done = False
 for epoch in range(int(args.epochs) + 1):
     g = torch.Generator().manual_seed(1000 + epoch)   # 固定种子 → 顺序可复现
-    loader = DataLoader(ds, batch_size=1, shuffle=True, generator=g, collate_fn=collate)
+    loader = DataLoader(ds, batch_size=1, shuffle=not args.no_shuffle,
+                        generator=g, collate_fn=collate)
     for batch in loader:
         if done:
             break
